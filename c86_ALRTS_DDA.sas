@@ -1,6 +1,5 @@
 /*-----------------------------------------------------------------------------------------
   SECTION 1: SETUP & CONNECTIONS
-  (Images 1-2)
 -----------------------------------------------------------------------------------------*/
 /*sign-in script*/
 /*kinit -f PRYU0SRVWIN@MAPLE.FG.RBC.COM -t PRYU0SRVWIN_Prod.kt*/
@@ -79,7 +78,6 @@ libname alrtdata "&regpath./C86/output/alert/dda/";
 
 /*-----------------------------------------------------------------------------------------
   SECTION 2: DATE & MACRO SETUP
-  (Images 3-4)
 -----------------------------------------------------------------------------------------*/
 %let ini_run = 'I';
 %macro ini_check;
@@ -131,7 +129,6 @@ run;
 
 /*-----------------------------------------------------------------------------------------
   SECTION 3: HIVE DATA EXTRACTION
-  (Images 5-9, 15-17)
 -----------------------------------------------------------------------------------------*/
 proc sql noprint;
 connect to hadoop as sql1 (
@@ -176,15 +173,35 @@ quit;
 /* Create Table PREF_NEW */
 proc sql noprint;
 connect to hadoop as sql1 (
-/* ... connection string repeated as above ... */
+URI="jdbc:hive2://strplpaed12007.fg.rbc.com:2181,
+              strplpaed12009.fg.rbc.com:2181,
+              strplpaed12010.fg.rbc.com:2181,
+              strplpaed12013.fg.rbc.com:2181/;serviceDiscoveryMode=zooKeeper;ssl=true;zooKeeperNamespace=hiveserver2"
+schema=prod_brt0_ess
+DBMAX_TEXT=256
+LOGIN_TIMEOUT=600
 );
-/* ... execute SET commands repeated ... */
+execute(SET tez.queue.name=PRYU0) by sql1;
+execute(SET hive.execution.engine=tez) by sql1;
+execute(SET hive.compute.query.using.stats=true) by sql1;
 
 create table pref_new as
 select * from connection to sql1
 (
 select
-/* ... same columns as pref_init ... */
+cast(regexp_replace(eventattributes ['ess_process_timestamp'] ,"T|Z"," ") as timestamp) as ess_process_timestamp_p,
+cast(regexp_replace(eventattributes ['ess_src_event_timestamp'] ,"T|Z"," ") as timestamp) as ess_src_event_timestamp_p,
+cast(regexp_replace(get_json_object(eventAttributes['SourceEventHeader'], '$.eventTimestamp'),"T|Z"," ") as timestamp) as eventTimestamp_p,
+
+get_json_object(eventAttributes['eventPayload'], '$.preferenceType') as preferenceType_p,
+get_json_object(eventAttributes['eventPayload'], '$.clientId') as clientId_p,
+get_json_object(eventAttributes['eventPayload'], '$.sendAlertEligible') as sendAlertEligible_p,
+get_json_object(eventAttributes['eventPayload'], '$.active') as active_p,
+get_json_object(eventAttributes['eventPayload'], '$.threshold') as threshold_p,
+get_json_object(eventAttributes['eventPayload'], '$.optOutDate') as optOutDate_p,
+get_json_object(eventAttributes['eventPayload'], '$.accountId') as accountId,
+get_json_object(eventAttributes['eventPayload'], '$.productType') as productType_p
+
 from prod_brt0_ess.ffs0___client_alert_preferences_dep
 where
 get_json_object(eventAttributes['eventPayload'], '$.preferenceType') = 'DDA_BALANCE_ALERT'
@@ -194,8 +211,19 @@ quit;
 
 /* Create Table COLT_START */
 proc sql noprint;
-connect to hadoop as sql1 ( ... );
-/* ... set commands ... */
+connect to hadoop as sql1 (
+URI="jdbc:hive2://strplpaed12007.fg.rbc.com:2181,
+              strplpaed12009.fg.rbc.com:2181,
+              strplpaed12010.fg.rbc.com:2181,
+              strplpaed12013.fg.rbc.com:2181/;serviceDiscoveryMode=zooKeeper;ssl=true;zooKeeperNamespace=hiveserver2"
+schema=prod_brt0_ess
+DBMAX_TEXT=256
+LOGIN_TIMEOUT=600
+);
+execute(SET tez.queue.name=PRYU0) by sql1;
+execute(SET hive.execution.engine=tez) by sql1;
+execute(SET hive.compute.query.using.stats=true) by sql1;
+
 create table colt_start as
 select * from connection to sql1
 (
@@ -238,8 +266,19 @@ quit;
 
 /* Create Table ALERT_INBOX */
 proc sql noprint;
-connect to hadoop as sql1 ( ... );
-/* ... set commands ... */
+connect to hadoop as sql1 (
+URI="jdbc:hive2://strplpaed12007.fg.rbc.com:2181,
+              strplpaed12009.fg.rbc.com:2181,
+              strplpaed12010.fg.rbc.com:2181,
+              strplpaed12013.fg.rbc.com:2181/;serviceDiscoveryMode=zooKeeper;ssl=true;zooKeeperNamespace=hiveserver2"
+schema=prod_brt0_ess
+DBMAX_TEXT=256
+LOGIN_TIMEOUT=600
+);
+execute(SET tez.queue.name=PRYU0) by sql1;
+execute(SET hive.execution.engine=tez) by sql1;
+execute(SET hive.compute.query.using.stats=true) by sql1;
+
 create table alert_inbox as 
 select * from connection to sql1
 (
@@ -267,7 +306,6 @@ quit;
 
 /*-----------------------------------------------------------------------------------------
   SECTION 4: TERADATA PULLS & PREP
-  (Images 10-11)
 -----------------------------------------------------------------------------------------*/
 data pref_new2 (drop=accountID);
 set pref_new;
@@ -319,7 +357,6 @@ run;
 
 /*-----------------------------------------------------------------------------------------
   SECTION 5: COLT PROCESSING & SAMPLING
-  (Images 11-14)
 -----------------------------------------------------------------------------------------*/
 data colt2;
 set colt;
@@ -419,7 +456,6 @@ quit;
 
 /*-----------------------------------------------------------------------------------------
   SECTION 6: MERGING WITH INBOX & PREFERENCES
-  (Images 14-19)
 -----------------------------------------------------------------------------------------*/
 /* combine colt and inbox data */
 proc sort data = dda_colt ;
@@ -573,7 +609,6 @@ quit;
 
 /*-----------------------------------------------------------------------------------------
   SECTION 7: TIMELINESS & LOGIC
-  (Images 20-24)
 -----------------------------------------------------------------------------------------*/
 data inboth_met_time
      inboth_did_not_meet_time
@@ -668,14 +703,48 @@ data total_completeness;
         inboth_did_not_meet_time (in=notime)
         incolt_only (in=inmiss);
     ControlRisk = 'Completeness';
-    /* ... format and variable setup identical to total_timeliness ... */
-    /* logic same as total_timeliness */
+    format transaction_date date9.;
+    transaction_date = transactiontimestamp_c2;
+    alertamount = input(alertamount_c, comma9.);
+    thresholdamount = input(thresholdamount_c, comma9.);
+    if intime then do;
+        CommentCode = 'COM16';
+        Comments = 'Pass';
+    end;
+    if notime then do;
+        CommentCode = 'COM16';
+        Comments = 'Pass';
+    end;
+    if inmiss then do;
+        CommentCode = 'COM19';
+        Comments = 'Potential Fail';
+    end;
 run;
 
 proc sql;
 create table ac_comp_dda_alert as
 select
-/* ... same columns as ac_time_dda_alert but RDE='Alert003_Completeness_All_Clients' ... */
+RegulatoryName,
+LOB,
+ReportName,
+ControlRisk,
+'Reconciliation' as TestType,
+'Portfolio' as TestPeriod,
+ProductType,
+'Alert003_Completeness_All_Clients' as RDE,
+'' as SubDE,
+'' as Segment,
+/* ... Segments 2-9 empty ... */
+put(transaction_date, yymmn6.) as segment10 length = 50,
+'N' as HoldoutFlag,
+CommentCode,
+Comments,
+count(accountId) as Volume,
+sum(alertamount) as Bal,
+sum(thresholdamount) as Amount,
+input(&date_com., yymmdd10.) as DateCompleted format = yymmdd10.,
+newdate as SnapDate format = yymmdd10.
+
 from total_completeness
 where transaction_date ne .
 group by 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,26,27
@@ -685,7 +754,6 @@ quit;
 
 /*-----------------------------------------------------------------------------------------
   SECTION 8: MACRO DDA_WEEK & TERADATA LOOPS
-  (Images 25-29)
 -----------------------------------------------------------------------------------------*/
 options sasautos = ("&cdepath/common/macros/general");
 
@@ -800,13 +868,34 @@ quit;
 
 %dda_week(0);
 %dda_week(1);
-/* ... repeats for 2 through 13 ... */
+%dda_week(2);
+%dda_week(3);
+%dda_week(4);
+%dda_week(5);
+%dda_week(6);
+%dda_week(7);
+%dda_week(8);
+%dda_week(9);
+%dda_week(10);
+%dda_week(11);
+%dda_week(12);
 %dda_week(13);
 
 data pers_pda_population;
     set
     pers_pda_population_0
-    /* ... repeats for 1-12 ... */
+    pers_pda_population_1
+    pers_pda_population_2
+    pers_pda_population_3
+    pers_pda_population_4
+    pers_pda_population_5
+    pers_pda_population_6
+    pers_pda_population_7
+    pers_pda_population_8
+    pers_pda_population_9
+    pers_pda_population_10
+    pers_pda_population_11
+    pers_pda_population_12
     pers_pda_population_13
     ;
     if bal_yesterday = . then bal_yesterday = 0;
@@ -814,7 +903,6 @@ run;
 
 /*-----------------------------------------------------------------------------------------
   SECTION 9: LOGIC & FLAGS
-  (Images 30-35)
 -----------------------------------------------------------------------------------------*/
 proc sort data=pers_pda_population nodupkey;
     by clnt_no ar_id snap_dt;
@@ -1018,7 +1106,6 @@ quit;
 
 /*-----------------------------------------------------------------------------------------
   SECTION 10: FINAL REPORTING DATASETS
-  (Images 38-40)
 -----------------------------------------------------------------------------------------*/
 data alrtdata.dda_alrt_ac_fail_wk_&ymd2. (keep= event_month event_week_ending lob product account_number account_status balance_after_transaction transaction_date decision clientid_mask thresholdamount decisionid reporting_date previousbalance);
 set edw_hive_full_txn;
@@ -1092,7 +1179,6 @@ run;
 
 /*-----------------------------------------------------------------------------------------
   SECTION 11: TIMELINESS DETAIL & EXPORTS
-  (Images 41-46)
 -----------------------------------------------------------------------------------------*/
 data totaltime;
 set Inboth_did_not_meet_time (in=notime)
@@ -1169,9 +1255,24 @@ run;
 /*... multiple %commexp calls ...*/
 
 /*-----------------------------------------------------------------------------------------
-  SECTION 13: UAT & CHECKS
-  (Images 47-60)
+  SECTION 13: UAT & CHECKS (Wrapped in macro 'skip')
 -----------------------------------------------------------------------------------------*/
+/* %macro skip; */
+/* NOTE: The 'skip' macro start definition appears in image 43. 
+   It wraps the UAT logic below. */
+
+/* libname alrtdata ... server=_server_; */
+
+/* data dda_alert_ac_curr; set alrtdata.dda_alert_ac_curr; run; */
+/* data dda_alrt_comp_fail_cur; set alrtdata.dda_alrt_comp_fail_cur; run; */
+/* data dda_alrt_time_fail_cur; set alrtdata.dda_alrt_time_fail_cur; run; */
+/* data dda_alrt_ac_fail_cur; set alrtdata.dda_alrt_ac_fail_cur; run; */
+
+/*%commexp(rmtwork.Inbox_only, Inbox_only.xlsx);*/
+/*%commexp(rmtwork.Incolt_only, Incolt_only.xlsx);*/
+/*%commexp(rmtwork.Inbox_only_samp, Inbox_only_samp.xlsx);*/
+/*%commexp(rmtwork.Incolt_only_samp, Incolt_only_samp.xlsx);*/
+
 proc sql;
 create table check as 
 select 
@@ -1265,3 +1366,25 @@ select decisionid, count(decisionid) as decisionid_count
 from colt_decisioned
 group by 1 order by 2;
 quit;
+
+proc freq data = colt_decisionid_count;
+tables decisionid_count;
+run;
+
+proc sql;
+create table inbox_decisionid_count as
+select
+    decisionid,
+    count(decisionid) as decisionid_count
+from
+    alert_inbox_utc
+group by 1
+order by 2
+;
+quit;
+
+proc freq data = inbox_decisionid_count;
+tables decisionid_count;
+run;
+
+%mend skip;
