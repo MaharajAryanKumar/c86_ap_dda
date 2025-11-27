@@ -228,151 +228,303 @@ def ini_check(paths: Paths) -> str:
 # --------------------------------------------------------------------------------------
 
 def fetch_pref_init(conn_trino: trino.dbapi.Connection) -> pd.DataFrame:
-    """
-    SAS PREF_INIT on Hive → Trino.
-    """
     sql = """
+    WITH base AS (
+      SELECT
+        try(CAST(from_iso8601_timestamp(element_at(eventattributes, 'ess_process_timestamp')) AS timestamp))
+          AS ess_process_timestamp_p,
+        try(CAST(from_iso8601_timestamp(element_at(eventattributes, 'ess_src_event_timestamp')) AS timestamp))
+          AS ess_src_event_timestamp_p,
+        try(json_parse(element_at(eventattributes, 'SourceEventHeader'))) AS hdr,
+        try(json_parse(element_at(eventattributes, 'eventPayload')))      AS payload
+      FROM prod_brt0_ess.ffs0___client_alert_preferences_dep___initial_load
+      WHERE partition_date = DATE '2022-03-24'
+    )
     SELECT
-        CAST(regexp_replace(eventattributes['ess_process_timestamp'], 'T|Z', ' ') AS timestamp)
-            AS ess_process_timestamp_p,
-        CAST(regexp_replace(eventattributes['ess_src_event_timestamp'], 'T|Z', ' ') AS timestamp)
-            AS ess_src_event_timestamp_p,
-        CAST(regexp_replace(
-                json_extract_scalar(eventattributes['SourceEventHeader'], '$.eventTimestamp'),
-                'T|Z', ' '
-            ) AS timestamp) AS eventTimestamp_p,
+      ess_process_timestamp_p,
+      ess_src_event_timestamp_p,
+      try(CAST(from_iso8601_timestamp(json_extract_scalar(hdr, '$.eventTimestamp')) AS timestamp))
+        AS eventtimestamp_p,
 
-        json_extract_scalar(eventattributes['eventPayload'], '$.preferenceType') AS preferenceType_p,
-        json_extract_scalar(eventattributes['eventPayload'], '$.clientId')        AS clientId_p,
-        json_extract_scalar(eventattributes['eventPayload'], '$.sendAlertEligible') AS sendAlertEligible_p,
-        json_extract_scalar(eventattributes['eventPayload'], '$.active')         AS active_p,
-        CAST(json_extract_scalar(eventattributes['eventPayload'], '$.threshold') AS double) AS threshold_p,
-        json_extract_scalar(eventattributes['eventPayload'], '$.optOutDate')     AS optOutDate_p,
-        json_extract_scalar(eventattributes['eventPayload'], '$.account')        AS account,
-        json_extract_scalar(eventattributes['eventPayload'], '$.productType')    AS productType_p
-    FROM prod_brt0_ess.ffs0___client_alert_preferences_dep___initial_load
-    WHERE json_extract_scalar(eventattributes['eventPayload'], '$.preferenceType')
-              = 'DDA_BALANCE_ALERT'
-      AND partition_date = DATE '2022-03-24'
+      json_extract_scalar(payload, '$.preferenceType')      AS preferencetype_p,
+      json_extract_scalar(payload, '$.clientId')            AS clientid_p,
+      json_extract_scalar(payload, '$.sendAlertEligible')   AS sendalerteligible_p,
+      json_extract_scalar(payload, '$.active')              AS active_p,
+      try(CAST(json_extract_scalar(payload, '$.threshold') AS double)) AS threshold_p,
+      json_extract_scalar(payload, '$.optOutDate')          AS optoutdate_p,
+      json_extract_scalar(payload, '$.account')             AS account,
+      json_extract_scalar(payload, '$.productType')         AS producttype_p
+    FROM base
+    WHERE json_extract_scalar(payload, '$.preferenceType') = 'DDA_BALANCE_ALERT'
     """
     logger.info("Running Trino PREF_INIT query...")
     return pd.read_sql(sql, conn_trino)
 
 
-def fetch_pref_new(conn_trino: trino.dbapi.Connection) -> pd.DataFrame:
-    """
-    SAS PREF_NEW on Hive → Trino.
-    """
-    sql = """
-    SELECT
-        CAST(regexp_replace(eventattributes['ess_process_timestamp'], 'T|Z', ' ') AS timestamp)
-            AS ess_process_timestamp_p,
-        CAST(regexp_replace(eventattributes['ess_src_event_timestamp'], 'T|Z', ' ') AS timestamp)
-            AS ess_src_event_timestamp_p,
-        CAST(regexp_replace(
-                json_extract_scalar(eventattributes['SourceEventHeader'], '$.eventTimestamp'),
-                'T|Z', ' '
-            ) AS timestamp) AS eventTimestamp_p,
+# def fetch_pref_init(conn_trino: trino.dbapi.Connection) -> pd.DataFrame:
+#     """
+#     SAS PREF_INIT on Hive → Trino.
+#     """
+#     sql = """
+#     SELECT
+#         CAST(regexp_replace(eventattributes['ess_process_timestamp'], 'T|Z', ' ') AS timestamp)
+#             AS ess_process_timestamp_p,
+#         CAST(regexp_replace(eventattributes['ess_src_event_timestamp'], 'T|Z', ' ') AS timestamp)
+#             AS ess_src_event_timestamp_p,
+#         CAST(regexp_replace(
+#                 json_extract_scalar(eventattributes['SourceEventHeader'], '$.eventTimestamp'),
+#                 'T|Z', ' '
+#             ) AS timestamp) AS eventTimestamp_p,
 
-        json_extract_scalar(eventattributes['eventPayload'], '$.preferenceType') AS preferenceType_p,
-        json_extract_scalar(eventattributes['eventPayload'], '$.clientId')        AS clientId_p,
-        json_extract_scalar(eventattributes['eventPayload'], '$.sendAlertEligible') AS sendAlertEligible_p,
-        json_extract_scalar(eventattributes['eventPayload'], '$.active')         AS active_p,
-        CAST(json_extract_scalar(eventattributes['eventPayload'], '$.threshold') AS double) AS threshold_p,
-        json_extract_scalar(eventattributes['eventPayload'], '$.optOutDate')     AS optOutDate_p,
-        json_extract_scalar(eventattributes['eventPayload'], '$.accountId')      AS accountId,
-        json_extract_scalar(eventattributes['eventPayload'], '$.productType')    AS productType_p
-    FROM prod_brt0_ess.ffs0___client_alert_preferences_dep
-    WHERE json_extract_scalar(eventattributes['eventPayload'], '$.preferenceType')
-              = 'DDA_BALANCE_ALERT'
+#         json_extract_scalar(eventattributes['eventPayload'], '$.preferenceType') AS preferenceType_p,
+#         json_extract_scalar(eventattributes['eventPayload'], '$.clientId')        AS clientId_p,
+#         json_extract_scalar(eventattributes['eventPayload'], '$.sendAlertEligible') AS sendAlertEligible_p,
+#         json_extract_scalar(eventattributes['eventPayload'], '$.active')         AS active_p,
+#         CAST(json_extract_scalar(eventattributes['eventPayload'], '$.threshold') AS double) AS threshold_p,
+#         json_extract_scalar(eventattributes['eventPayload'], '$.optOutDate')     AS optOutDate_p,
+#         json_extract_scalar(eventattributes['eventPayload'], '$.account')        AS account,
+#         json_extract_scalar(eventattributes['eventPayload'], '$.productType')    AS productType_p
+#     FROM prod_brt0_ess.ffs0___client_alert_preferences_dep___initial_load
+#     WHERE json_extract_scalar(eventattributes['eventPayload'], '$.preferenceType')
+#               = 'DDA_BALANCE_ALERT'
+#       AND partition_date = DATE '2022-03-24'
+#     """
+#     logger.info("Running Trino PREF_INIT query...")
+#     return pd.read_sql(sql, conn_trino)
+
+
+# def fetch_pref_new(conn_trino: trino.dbapi.Connection) -> pd.DataFrame:
+#     """
+#     SAS PREF_NEW on Hive → Trino.
+#     """
+#     sql = """
+#     SELECT
+#         CAST(regexp_replace(eventattributes['ess_process_timestamp'], 'T|Z', ' ') AS timestamp)
+#             AS ess_process_timestamp_p,
+#         CAST(regexp_replace(eventattributes['ess_src_event_timestamp'], 'T|Z', ' ') AS timestamp)
+#             AS ess_src_event_timestamp_p,
+#         CAST(regexp_replace(
+#                 json_extract_scalar(eventattributes['SourceEventHeader'], '$.eventTimestamp'),
+#                 'T|Z', ' '
+#             ) AS timestamp) AS eventTimestamp_p,
+
+#         json_extract_scalar(eventattributes['eventPayload'], '$.preferenceType') AS preferenceType_p,
+#         json_extract_scalar(eventattributes['eventPayload'], '$.clientId')        AS clientId_p,
+#         json_extract_scalar(eventattributes['eventPayload'], '$.sendAlertEligible') AS sendAlertEligible_p,
+#         json_extract_scalar(eventattributes['eventPayload'], '$.active')         AS active_p,
+#         CAST(json_extract_scalar(eventattributes['eventPayload'], '$.threshold') AS double) AS threshold_p,
+#         json_extract_scalar(eventattributes['eventPayload'], '$.optOutDate')     AS optOutDate_p,
+#         json_extract_scalar(eventattributes['eventPayload'], '$.accountId')      AS accountId,
+#         json_extract_scalar(eventattributes['eventPayload'], '$.productType')    AS productType_p
+#     FROM prod_brt0_ess.ffs0___client_alert_preferences_dep
+#     WHERE json_extract_scalar(eventattributes['eventPayload'], '$.preferenceType')
+#               = 'DDA_BALANCE_ALERT'
+#     """
+#     logger.info("Running Trino PREF_NEW query...")
+#     return pd.read_sql(sql, conn_trino)
+
+def fetch_pref_new(conn_trino: trino.dbapi.Connection) -> pd.DataFrame:
+    sql = """
+    WITH base AS (
+      SELECT
+        try(CAST(from_iso8601_timestamp(element_at(eventattributes, 'ess_process_timestamp')) AS timestamp))
+          AS ess_process_timestamp_p,
+        try(CAST(from_iso8601_timestamp(element_at(eventattributes, 'ess_src_event_timestamp')) AS timestamp))
+          AS ess_src_event_timestamp_p,
+        try(json_parse(element_at(eventattributes, 'SourceEventHeader'))) AS hdr,
+        try(json_parse(element_at(eventattributes, 'eventPayload')))      AS payload
+      FROM prod_brt0_ess.ffs0___client_alert_preferences_dep
+    )
+    SELECT
+      ess_process_timestamp_p,
+      ess_src_event_timestamp_p,
+      try(CAST(from_iso8601_timestamp(json_extract_scalar(hdr, '$.eventTimestamp')) AS timestamp))
+        AS eventtimestamp_p,
+
+      json_extract_scalar(payload, '$.preferenceType')      AS preferencetype_p,
+      json_extract_scalar(payload, '$.clientId')            AS clientid_p,
+      json_extract_scalar(payload, '$.sendAlertEligible')   AS sendalerteligible_p,
+      json_extract_scalar(payload, '$.active')              AS active_p,
+      try(CAST(json_extract_scalar(payload, '$.threshold') AS double)) AS threshold_p,
+      json_extract_scalar(payload, '$.optOutDate')          AS optoutdate_p,
+
+      -- some records store accountId, some store account; keep both safely
+      coalesce(
+        json_extract_scalar(payload, '$.accountId'),
+        json_extract_scalar(payload, '$.account')
+      ) AS accountid,
+
+      json_extract_scalar(payload, '$.productType')         AS producttype_p
+    FROM base
+    WHERE json_extract_scalar(payload, '$.preferenceType') = 'DDA_BALANCE_ALERT'
     """
     logger.info("Running Trino PREF_NEW query...")
     return pd.read_sql(sql, conn_trino)
 
-
 def fetch_colt_start(conn_trino: trino.dbapi.Connection, dc: DateContext) -> pd.DataFrame:
-    """
-    SAS COLT_START on Hive → Trino.
-    """
     sql = f"""
+    WITH base AS (
+      SELECT
+        try(CAST(from_iso8601_timestamp(element_at(eventattributes, 'ess_process_timestamp')) AS timestamp))
+          AS ess_process_timestamp_c,
+        try(CAST(from_iso8601_timestamp(element_at(eventattributes, 'ess_src_event_timestamp')) AS timestamp))
+          AS ess_src_event_timestamp_c,
+        try(json_parse(element_at(eventattributes, 'SourceEventHeader'))) AS hdr,
+        try(json_parse(element_at(eventattributes, 'eventPayload')))      AS payload,
+        partition_date
+      FROM prod_brt0_ess.zgv0___colt_front_end_system
+      WHERE partition_date > DATE '{dc.par_dt.strftime("%Y-%m-%d")}'
+    )
     SELECT
-        CAST(regexp_replace(eventattributes['ess_process_timestamp'], 'T|Z', ' ') AS timestamp)
-            AS ess_process_timestamp_c,
-        CAST(regexp_replace(eventattributes['ess_src_event_timestamp'], 'T|Z', ' ') AS timestamp)
-            AS ess_src_event_timestamp_c,
-        CAST(regexp_replace(
-                json_extract_scalar(eventattributes['SourceEventHeader'], '$.eventTimestamp'),
-                'T|Z', ' '
-            ) AS timestamp) AS eventTimestamp_c,
-        json_extract_scalar(eventattributes['SourceEventHeader'], '$.eventActivityName')
-            AS eventActivityName_c,
+      ess_process_timestamp_c,
+      ess_src_event_timestamp_c,
+      try(CAST(from_iso8601_timestamp(json_extract_scalar(hdr, '$.eventTimestamp')) AS timestamp))
+        AS eventtimestamp_c,
+      json_extract_scalar(hdr, '$.eventActivityName') AS eventactivityname_c,
 
-        json_extract_scalar(eventattributes['eventPayload'], '$.alertType')        AS alertType_c,
-        json_extract_scalar(eventattributes['eventPayload'], '$.clientId')        AS clientId_c,
-        CAST(json_extract_scalar(eventattributes['eventPayload'], '$.thresholdAmount') AS double)
-            AS thresholdAmount_c,
-        CAST(regexp_replace(
-                json_extract_scalar(eventattributes['eventPayload'], '$.transactionTimestamp'),
-                'T|Z', ' '
-            ) AS timestamp) AS transactionTimestamp_c,
-        CAST(json_extract_scalar(eventattributes['eventPayload'], '$.alertAmount') AS double)
-            AS alertAmount_c,
-        CAST(json_extract_scalar(eventattributes['eventPayload'], '$.previousBalance') AS double)
-            AS previousBalance_c,
-        json_extract_scalar(eventattributes['eventPayload'], '$.accountStatus')   AS accountStatus_c,
-        json_extract_scalar(eventattributes['eventPayload'], '$.accountId')       AS accountId,
-        json_extract_scalar(eventattributes['eventPayload'], '$.processingCentre') AS processingCentre_c,
-        json_extract_scalar(eventattributes['eventPayload'], '$.accountCloseInd') AS accountCloseInd_c,
-        json_extract_scalar(eventattributes['eventPayload'], '$.decisionId')      AS decisionId,
-        json_extract_scalar(eventattributes['eventPayload'], '$.reasonCodes')     AS reasonCodes_c
-    FROM prod_brt0_ess.zgv0___colt_front_end_system
-    WHERE partition_date > DATE '{dc.par_dt.strftime("%Y-%m-%d")}'
-      AND json_extract_scalar(eventattributes['eventPayload'], '$.alertType')
-              = 'DDA_BALANCE_ALERT'
-      AND CAST(regexp_replace(
-                json_extract_scalar(eventattributes['eventPayload'], '$.transactionTimestamp'),
-                'T|Z', ' '
-          ) AS timestamp)
-          BETWEEN TIMESTAMP '{dc.snap_dt_hive} 00:00:00'
-              AND TIMESTAMP '{dc.today.strftime("%Y-%m-%d")} 23:59:59'
+      json_extract_scalar(payload, '$.alertType') AS alerttype_c,
+      json_extract_scalar(payload, '$.clientId')  AS clientid_c,
+
+      try(CAST(json_extract_scalar(payload, '$.thresholdAmount') AS double)) AS thresholdamount_c,
+
+      try(CAST(from_iso8601_timestamp(json_extract_scalar(payload, '$.transactionTimestamp')) AS timestamp))
+        AS transactiontimestamp_c,
+
+      try(CAST(json_extract_scalar(payload, '$.alertAmount') AS double))       AS alertamount_c,
+      try(CAST(json_extract_scalar(payload, '$.previousBalance') AS double))   AS previousbalance_c,
+
+      json_extract_scalar(payload, '$.accountStatus')    AS accountstatus_c,
+      json_extract_scalar(payload, '$.accountId')        AS accountid,
+      json_extract_scalar(payload, '$.processingCentre') AS processingcentre_c,
+      json_extract_scalar(payload, '$.accountCloseInd')  AS accountcloseind_c,
+      json_extract_scalar(payload, '$.decisionId')       AS decisionid,
+      json_extract_scalar(payload, '$.reasonCodes')      AS reasoncodes_c
+    FROM base
+    WHERE json_extract_scalar(payload, '$.alertType') = 'DDA_BALANCE_ALERT'
+      AND transactiontimestamp_c BETWEEN TIMESTAMP '{dc.snap_dt_hive} 00:00:00'
+                                    AND TIMESTAMP '{dc.today.strftime("%Y-%m-%d")} 23:59:59'
     """
     logger.info("Running Trino COLT_START query...")
     return pd.read_sql(sql, conn_trino)
 
 
-def fetch_alert_inbox(conn_trino: trino.dbapi.Connection, dc: DateContext) -> pd.DataFrame:
-    """
-    SAS ALERT_INBOX on Hive → Trino.
-    """
-    sql = f"""
-    SELECT
-        CAST(regexp_replace(eventattributes['ess_process_timestamp'], 'T|Z', ' ') AS timestamp)
-            AS ess_process_timestamp_a,
-        CAST(regexp_replace(eventattributes['ess_src_event_timestamp'], 'T|Z', ' ') AS timestamp)
-            AS ess_src_event_timestamp_a,
-        CAST(regexp_replace(
-                json_extract_scalar(eventattributes['SourceEventHeader'], '$.eventTimestamp'),
-                'T|Z', ' '
-            ) AS timestamp) AS eventTimestamp_a,
+# def fetch_colt_start(conn_trino: trino.dbapi.Connection, dc: DateContext) -> pd.DataFrame:
+#     """
+#     SAS COLT_START on Hive → Trino.
+#     """
+#     sql = f"""
+#     SELECT
+#         CAST(regexp_replace(eventattributes['ess_process_timestamp'], 'T|Z', ' ') AS timestamp)
+#             AS ess_process_timestamp_c,
+#         CAST(regexp_replace(eventattributes['ess_src_event_timestamp'], 'T|Z', ' ') AS timestamp)
+#             AS ess_src_event_timestamp_c,
+#         CAST(regexp_replace(
+#                 json_extract_scalar(eventattributes['SourceEventHeader'], '$.eventTimestamp'),
+#                 'T|Z', ' '
+#             ) AS timestamp) AS eventTimestamp_c,
+#         json_extract_scalar(eventattributes['SourceEventHeader'], '$.eventActivityName')
+#             AS eventActivityName_c,
 
-        json_extract_scalar(eventattributes['eventPayload'], '$.alertType')       AS alertType_a,
-        json_extract_scalar(eventattributes['eventPayload'], '$.decisionId')     AS decisionId,
-        json_extract_scalar(eventattributes['eventPayload'], '$.accountId')      AS accountId,
-        CAST(json_extract_scalar(eventattributes['eventPayload'], '$.alertAmount') AS double)
-            AS alertAmount_a,
-        CAST(json_extract_scalar(eventattributes['eventPayload'], '$.thresholdAmount') AS double)
-            AS thresholdAmount_a,
-        json_extract_scalar(eventattributes['eventPayload'], '$.alertSent')      AS alertSent_a,
-        json_extract_scalar(eventattributes['eventPayload'], '$.reasonCode')     AS reasonCode_a
-    FROM prod_brt0_ess.fft0___alert_inbox_dep
-    WHERE partition_date > DATE '{dc.par_dt.strftime("%Y-%m-%d")}'
-      AND CAST(regexp_replace(eventattributes['ess_src_event_timestamp'], 'T|Z', ' ') AS timestamp)
-              >= TIMESTAMP '{dc.snap_dt_hive} 00:00:00'
-      AND json_extract_scalar(eventattributes['eventPayload'], '$.alertType')
-              = 'DDA_BALANCE_ALERT'
+#         json_extract_scalar(eventattributes['eventPayload'], '$.alertType')        AS alertType_c,
+#         json_extract_scalar(eventattributes['eventPayload'], '$.clientId')        AS clientId_c,
+#         CAST(json_extract_scalar(eventattributes['eventPayload'], '$.thresholdAmount') AS double)
+#             AS thresholdAmount_c,
+#         CAST(regexp_replace(
+#                 json_extract_scalar(eventattributes['eventPayload'], '$.transactionTimestamp'),
+#                 'T|Z', ' '
+#             ) AS timestamp) AS transactionTimestamp_c,
+#         CAST(json_extract_scalar(eventattributes['eventPayload'], '$.alertAmount') AS double)
+#             AS alertAmount_c,
+#         CAST(json_extract_scalar(eventattributes['eventPayload'], '$.previousBalance') AS double)
+#             AS previousBalance_c,
+#         json_extract_scalar(eventattributes['eventPayload'], '$.accountStatus')   AS accountStatus_c,
+#         json_extract_scalar(eventattributes['eventPayload'], '$.accountId')       AS accountId,
+#         json_extract_scalar(eventattributes['eventPayload'], '$.processingCentre') AS processingCentre_c,
+#         json_extract_scalar(eventattributes['eventPayload'], '$.accountCloseInd') AS accountCloseInd_c,
+#         json_extract_scalar(eventattributes['eventPayload'], '$.decisionId')      AS decisionId,
+#         json_extract_scalar(eventattributes['eventPayload'], '$.reasonCodes')     AS reasonCodes_c
+#     FROM prod_brt0_ess.zgv0___colt_front_end_system
+#     WHERE partition_date > DATE '{dc.par_dt.strftime("%Y-%m-%d")}'
+#       AND json_extract_scalar(eventattributes['eventPayload'], '$.alertType')
+#               = 'DDA_BALANCE_ALERT'
+#       AND CAST(regexp_replace(
+#                 json_extract_scalar(eventattributes['eventPayload'], '$.transactionTimestamp'),
+#                 'T|Z', ' '
+#           ) AS timestamp)
+#           BETWEEN TIMESTAMP '{dc.snap_dt_hive} 00:00:00'
+#               AND TIMESTAMP '{dc.today.strftime("%Y-%m-%d")} 23:59:59'
+#     """
+#     logger.info("Running Trino COLT_START query...")
+#     return pd.read_sql(sql, conn_trino)
+
+def fetch_alert_inbox(conn_trino: trino.dbapi.Connection, dc: DateContext) -> pd.DataFrame:
+    sql = f"""
+    WITH base AS (
+      SELECT
+        try(CAST(from_iso8601_timestamp(element_at(eventattributes, 'ess_process_timestamp')) AS timestamp))
+          AS ess_process_timestamp_a,
+        try(CAST(from_iso8601_timestamp(element_at(eventattributes, 'ess_src_event_timestamp')) AS timestamp))
+          AS ess_src_event_timestamp_a,
+        try(json_parse(element_at(eventattributes, 'SourceEventHeader'))) AS hdr,
+        try(json_parse(element_at(eventattributes, 'eventPayload')))      AS payload,
+        partition_date
+      FROM prod_brt0_ess.fft0___alert_inbox_dep
+      WHERE partition_date > DATE '{dc.par_dt.strftime("%Y-%m-%d")}'
+    )
+    SELECT
+      ess_process_timestamp_a,
+      ess_src_event_timestamp_a,
+      try(CAST(from_iso8601_timestamp(json_extract_scalar(hdr, '$.eventTimestamp')) AS timestamp))
+        AS eventtimestamp_a,
+
+      json_extract_scalar(payload, '$.alertType')       AS alerttype_a,
+      json_extract_scalar(payload, '$.decisionId')      AS decisionid,
+      json_extract_scalar(payload, '$.accountId')       AS accountid,
+      try(CAST(json_extract_scalar(payload, '$.alertAmount') AS double))     AS alertamount_a,
+      try(CAST(json_extract_scalar(payload, '$.thresholdAmount') AS double)) AS thresholdamount_a,
+      json_extract_scalar(payload, '$.alertSent')       AS alertsent_a,
+      json_extract_scalar(payload, '$.reasonCode')      AS reasoncode_a
+    FROM base
+    WHERE ess_src_event_timestamp_a >= TIMESTAMP '{dc.snap_dt_hive} 00:00:00'
+      AND json_extract_scalar(payload, '$.alertType') = 'DDA_BALANCE_ALERT'
     """
     logger.info("Running Trino ALERT_INBOX query...")
     return pd.read_sql(sql, conn_trino)
+
+
+# def fetch_alert_inbox(conn_trino: trino.dbapi.Connection, dc: DateContext) -> pd.DataFrame:
+#     """
+#     SAS ALERT_INBOX on Hive → Trino.
+#     """
+#     sql = f"""
+#     SELECT
+#         CAST(regexp_replace(eventattributes['ess_process_timestamp'], 'T|Z', ' ') AS timestamp)
+#             AS ess_process_timestamp_a,
+#         CAST(regexp_replace(eventattributes['ess_src_event_timestamp'], 'T|Z', ' ') AS timestamp)
+#             AS ess_src_event_timestamp_a,
+#         CAST(regexp_replace(
+#                 json_extract_scalar(eventattributes['SourceEventHeader'], '$.eventTimestamp'),
+#                 'T|Z', ' '
+#             ) AS timestamp) AS eventTimestamp_a,
+
+#         json_extract_scalar(eventattributes['eventPayload'], '$.alertType')       AS alertType_a,
+#         json_extract_scalar(eventattributes['eventPayload'], '$.decisionId')     AS decisionId,
+#         json_extract_scalar(eventattributes['eventPayload'], '$.accountId')      AS accountId,
+#         CAST(json_extract_scalar(eventattributes['eventPayload'], '$.alertAmount') AS double)
+#             AS alertAmount_a,
+#         CAST(json_extract_scalar(eventattributes['eventPayload'], '$.thresholdAmount') AS double)
+#             AS thresholdAmount_a,
+#         json_extract_scalar(eventattributes['eventPayload'], '$.alertSent')      AS alertSent_a,
+#         json_extract_scalar(eventattributes['eventPayload'], '$.reasonCode')     AS reasonCode_a
+#     FROM prod_brt0_ess.fft0___alert_inbox_dep
+#     WHERE partition_date > DATE '{dc.par_dt.strftime("%Y-%m-%d")}'
+#       AND CAST(regexp_replace(eventattributes['ess_src_event_timestamp'], 'T|Z', ' ') AS timestamp)
+#               >= TIMESTAMP '{dc.snap_dt_hive} 00:00:00'
+#       AND json_extract_scalar(eventattributes['eventPayload'], '$.alertType')
+#               = 'DDA_BALANCE_ALERT'
+#     """
+#     logger.info("Running Trino ALERT_INBOX query...")
+#     return pd.read_sql(sql, conn_trino)
 
 
 # --------------------------------------------------------------------------------------
